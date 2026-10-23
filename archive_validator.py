@@ -116,12 +116,20 @@ def validate_and_extract(archive: Path, cache_dir: Path) -> list[Path]:
                 rf.extractall(cache_dir)
         else:
             raise ValidationError(f"Неподдерживаемый тип архива: {suffix}")
+
     except ValidationError:
         shutil.rmtree(cache_dir, ignore_errors=True)
         raise
     except zipfile.BadZipFile as e:
         shutil.rmtree(cache_dir, ignore_errors=True)
-        raise ValidationError(f"{VALIDATION_ERROR_MSG} (архив повреждён)") from e
+        raise ValidationError(
+            f"{VALIDATION_ERROR_MSG} (архив повреждён)"
+        ) from e
+    except Exception as e:
+        shutil.rmtree(cache_dir, ignore_errors=True)
+        raise ValidationError(
+            f"{VALIDATION_ERROR_MSG} (ошибка чтения или распаковки архива)"
+        ) from e
 
     # Собрать извлечённые изображения
     out = [p for p in cache_dir.rglob("*") if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS]
