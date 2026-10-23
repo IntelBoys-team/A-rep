@@ -1,6 +1,6 @@
 """Service Layer — Archive Validator: потоковое чтение + сквозная валидация Magic Numbers."""
 from __future__ import annotations
-
+import tempfile
 import shutil
 import zipfile
 from pathlib import Path
@@ -86,24 +86,51 @@ def validate_and_extract(archive: Path, cache_dir: Path) -> list[Path]:
             cache_dir.mkdir(parents=True, exist_ok=True)
             with zipfile.ZipFile(archive, "r") as zf:
                 zf.extractall(cache_dir)
+
         elif suffix == ".7z":
             try:
                 import py7zr
             except ImportError as e:
-                raise ValidationError("Для .7z установите зависимость py7zr") from e
-            with py7zr.SevenZipFile(archive, "r") as zf:
-                names = zf.getnames()
-                members = [n for n in names if not n.endswith("/")]
+                raise ValidationError(
+                    "Для .7z установите зависимость py7zr"
+                ) from e
+
+            with tempfile.TemporaryDirectory() as td:
+                temp_dir = Path(td)
+
+                # Сначала читаем список файлов в архиве
+                with py7zr.SevenZipFile(archive, "r") as zf:
+                    names = zf.getnames()
+
+                members = [
+                    n for n in names
+                    if not n.endswith(("/", "\\"))
+                ]
+
+                # Извлекаем во временную папку, а не в основной кэш
+                with py7zr.SevenZipFile(archive, "r") as zf:
+                    zf.extractall(path=temp_dir)
+
                 def _rh(n: str) -> bytes:
-                    d = zf.read([n])
-                    buf = d[n].read() if hasattr(d[n], "read") else bytes(d[n].getvalue())
-                    return buf[:4]
+                    file_path = temp_dir / n
+                    return file_path.read_bytes()[:4]
+
+                # Проверяем расширения и сигнатуры всех файлов
                 _validate_member_list(members, _rh)
+
+                # Только после успешной проверки извлекаем в кэш
                 cache_dir.mkdir(parents=True, exist_ok=True)
-                zf.extractall(cache_dir)
+                with py7zr.SevenZipFile(archive, "r") as zf:
+                    zf.extractall(path=cache_dir)
+
         elif suffix == ".rar":
             try:
+                import os
                 import rarfile
+                if os.name == "nt":
+                    seven_zip = r"C:\Program Files\7-Zip\7z.exe"
+                    if os.path.isfile(seven_zip):
+                        rarfile.UNRAR_TOOL = seven_zip
             except ImportError as e:
                 raise ValidationError("Для .rar установите зависимость rarfile") from e
             with rarfile.RarFile(archive, "r") as rf:
@@ -130,7 +157,6 @@ def validate_and_extract(archive: Path, cache_dir: Path) -> list[Path]:
         raise ValidationError(
             f"{VALIDATION_ERROR_MSG} (ошибка чтения или распаковки архива)"
         ) from e
-
     # Собрать извлечённые изображения
     out = [p for p in cache_dir.rglob("*") if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS]
     # Финальная проверка сигнатур на диске (защита от переименованных файлов)
