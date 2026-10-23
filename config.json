@@ -1,0 +1,10 @@
+{
+  "output_format": "WebP",
+  "quality": 80,
+  "interpolation": "Lanczos",
+  "output_dir": "",
+  "resize_enabled": false,
+  "width": 1920,
+  "height": 1080,
+  "keep_aspect": true
+}
